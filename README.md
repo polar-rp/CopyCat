@@ -24,7 +24,7 @@ CopyCat is a VS Code extension that monitors your workspace and automatically ge
 
 ### From Marketplace
 
-> Coming soon! Extension will be published to VS Code Marketplace.
+> https://marketplace.visualstudio.com/items?itemName=Polar-rp.copy-cat-polar
 
 ## Getting Started
 
