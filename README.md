@@ -4,7 +4,7 @@
 
 CopyCat is a VS Code extension that monitors your workspace and automatically generates a consolidated `copycat.md` file containing all your selected source code files. Perfect for sharing code with AI assistants, documentation, code reviews, or creating snapshots of your project structure.
 
-![Demo](example.gif)
+![Demo](https://github.com/polar-rp/CopyCat/blob/main/example.gif?raw=true)
 
 ## Features
 
