@@ -1,33 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { CopyCatConfig } from './config';
-
-const MAX_FILE_SIZE = 1024 * 100; // 100KB
-const LANG_MAP: Record<string, string> = {
-    '.ts': 'typescript',
-    '.tsx': 'tsx',
-    '.js': 'javascript',
-    '.jsx': 'jsx',
-    '.json': 'json',
-    '.html': 'html',
-    '.css': 'css',
-    '.scss': 'scss',
-    '.md': 'markdown',
-    '.py': 'python',
-    '.java': 'java',
-    '.c': 'c',
-    '.cpp': 'cpp',
-    '.go': 'go',
-    '.rs': 'rust',
-    '.php': 'php',
-    '.rb': 'ruby',
-    '.sh': 'bash',
-    '.yaml': 'yaml',
-    '.yml': 'yaml',
-    '.xml': 'xml',
-    '.sql': 'sql',
-    '.prisma': 'prisma',
-};
+import {LANG_MAP, ALWAYS_IGNORED, MAX_FILE_SIZE} from './defaults';
 
 export async function generateMarkdown(rootPath: vscode.Uri, config: CopyCatConfig): Promise<void> {
     const mdPath = vscode.Uri.joinPath(rootPath, 'copycat.md');
@@ -41,14 +15,17 @@ export async function generateMarkdown(rootPath: vscode.Uri, config: CopyCatConf
         config.include = ['**/*'];
     }
 
+    // Combine user config with always-ignored patterns
+    const ignorePatterns = [...config.ignore, ...ALWAYS_IGNORED];
+
     // Construct Globs
     const includeString = config.include.length > 1 
         ? `{${config.include.join(',')}}` 
         : config.include[0];
     
-    const excludeString = config.ignore.length > 1 
-        ? `{${config.ignore.join(',')}}` 
-        : (config.ignore[0] || undefined);
+    const excludeString = ignorePatterns.length > 1 
+        ? `{${ignorePatterns.join(',')}}` 
+        : (ignorePatterns[0] || undefined);
 
     // Use RelativePattern to scope search to the specific rootPath (supports multi-root better)
     const includePattern = new vscode.RelativePattern(rootPath, includeString);
