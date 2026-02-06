@@ -210,7 +210,7 @@ async function parseConfig(rootPath) {
     const fileData = await vscode.workspace.fs.readFile(configUri);
     content = fileData.toString();
   } catch (error) {
-    throw new Error('Configuration file .copycat not found. Run "CopyCat: Initialize" to create it.');
+    return null;
   }
   const config = {
     include: [],
@@ -384,8 +384,14 @@ async function runUpdate(folder) {
   }, async () => {
     try {
       const config = await parseConfig(folder.uri);
+      if (!config) {
+        statusBarItem.text = "$(circle-slash) CopyCat: No config";
+        statusBarItem.tooltip = 'Run "CopyCat: Initialize" to create .copycat file';
+        return;
+      }
       await generateMarkdown(folder.uri, config);
       statusBarItem.text = "$(check) CopyCat: Ready";
+      statusBarItem.tooltip = void 0;
     } catch (error) {
       console.error("CopyCat Error:", error);
       statusBarItem.text = "$(alert) CopyCat: Error";

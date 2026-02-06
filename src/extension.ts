@@ -87,8 +87,14 @@ async function runUpdate(folder: vscode.WorkspaceFolder) {
     }, async () => {
         try {
             const config = await parseConfig(folder.uri);
+            if (!config) {
+                statusBarItem.text = '$(circle-slash) CopyCat: No config';
+                statusBarItem.tooltip = 'Run "CopyCat: Initialize" to create .copycat file';
+                return;
+            }
             await generateMarkdown(folder.uri, config);
             statusBarItem.text = '$(check) CopyCat: Ready';
+            statusBarItem.tooltip = undefined;
         } catch (error) {
             console.error('CopyCat Error:', error);
             statusBarItem.text = '$(alert) CopyCat: Error';

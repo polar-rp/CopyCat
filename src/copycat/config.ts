@@ -17,7 +17,7 @@ export async function createDefaultConfig(rootPath: vscode.Uri) {
     }
 }
 
-export async function parseConfig(rootPath: vscode.Uri): Promise<CopyCatConfig> {
+export async function parseConfig(rootPath: vscode.Uri): Promise<CopyCatConfig | null> {
     const configUri = vscode.Uri.joinPath(rootPath, '.copycat');
     let content = '';
 
@@ -25,7 +25,7 @@ export async function parseConfig(rootPath: vscode.Uri): Promise<CopyCatConfig> 
         const fileData = await vscode.workspace.fs.readFile(configUri);
         content = fileData.toString();
     } catch (error) {
-        throw new Error('Configuration file .copycat not found. Run "CopyCat: Initialize" to create it.');
+        return null;
     }
 
     const config: CopyCatConfig = {
