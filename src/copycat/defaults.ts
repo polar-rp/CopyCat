@@ -101,22 +101,8 @@ export const LANG_MAP: Record<string, string> = {
     '.exs': 'elixir',
 };
 
-/**
- * Files and folders that are ALWAYS ignored, regardless of user configuration.
- * These patterns cover:
- * - Version control directories (.git)
- * - Package managers and dependencies (node_modules, vendor, etc.)
- * - Lock files (package-lock.json, yarn.lock, Cargo.lock, etc.)
- * - IDE and editor files (.vscode, .idea, *.swp)
- * - Operating system files (.DS_Store, Thumbs.db)
- * - Build artifacts and caches (.next, .nuxt, __pycache__)
- * - Log files and temporary files
- * - Source maps and minified files
- * - Test coverage and database files
- *
- * These patterns protect against accidentally including sensitive or unnecessary files.
- * Simple folder names (without wildcards) will be automatically transformed to ** /name/**  patterns.
- */
+// Files and folders that are ALWAYS ignored, regardless of user config
+// These are system files, dependencies, build artifacts, and logs that should never be tracked
 export const ALWAYS_IGNORED = [
     // CopyCat own files
     'copycat.md',
