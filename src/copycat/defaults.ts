@@ -20,12 +20,9 @@ package.json
 
 .env*
 
-dist/**
-build/**
-out/**
-
-.next/**
-.nuxt/**
+**/dist/**
+**/build/**
+**/out/**
 
 **/*.test.ts
 **/*.spec.ts
@@ -36,7 +33,7 @@ coverage/**
 # - Lock files (package-lock.json, yarn.lock, Cargo.lock, etc.)
 # - IDE files (.vscode, .idea, *.swp)
 # - OS files (.DS_Store, Thumbs.db, desktop.ini)
-# - Build outputs (.next, dist, build, __pycache__, *.pyc)
+# - Build outputs (.next, .nuxt, __pycache__, *.pyc)
 # - Logs (*.log), cache (.cache, .turbo), temp files
 # - Source maps (*.map), coverage, and database files (*.db, *.sqlite)
 
@@ -81,10 +78,11 @@ export const ALWAYS_IGNORED = [
     '.gitattributes',
     '.gitkeep',
     
-    // Dependencies
-    'node_modules/**',
-    'vendor/**',
-    'bower_components/**',
+    // Dependencies and package caches (in any location in the tree)
+    'node_modules',
+    'vendor',
+    'bower_components',
+    '.cargo',
     
     // Lock files
     'package-lock.json',
@@ -125,6 +123,8 @@ export const ALWAYS_IGNORED = [
     'pnpm-debug.log*',
     
     // Cache and build artifacts
+    'target',
+    'gen',
     '.cache/**',
     '.turbo/**',
     '.next/**',
