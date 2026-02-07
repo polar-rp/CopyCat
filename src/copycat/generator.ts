@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
+import { minimatch } from 'minimatch';
 import { CopyCatConfig } from './config';
 import {LANG_MAP, ALWAYS_IGNORED, MAX_FILE_SIZE} from './defaults';
 
@@ -16,23 +17,46 @@ export async function generateMarkdown(rootPath: vscode.Uri, config: CopyCatConf
     }
 
     // Combine user config with always-ignored patterns
-    const ignorePatterns = [...config.ignore, ...ALWAYS_IGNORED];
+    // Transform simple folder names to glob patterns
+    const alwaysIgnoredPatterns = ALWAYS_IGNORED.map(pattern => {
+        // If it's a simple name without glob patterns, convert to **/name/**
+        if (!pattern.includes('/') && !pattern.includes('*') && !pattern.includes('.')) {
+            return `**/${pattern}/**`;
+        }
+        return pattern;
+    });
+    const ignorePatterns = [...config.ignore, ...alwaysIgnoredPatterns];
 
     // Construct Globs
     const includeString = config.include.length > 1 
         ? `{${config.include.join(',')}}` 
         : config.include[0];
-    
-    const excludeString = ignorePatterns.length > 1 
-        ? `{${ignorePatterns.join(',')}}` 
-        : (ignorePatterns[0] || undefined);
 
     // Use RelativePattern to scope search to the specific rootPath (supports multi-root better)
     const includePattern = new vscode.RelativePattern(rootPath, includeString);
 
     let files: vscode.Uri[] = [];
     try {
-        files = await vscode.workspace.findFiles(includePattern, excludeString);
+        // Get all files matching include pattern (no exclude pattern here)
+        const allFiles = await vscode.workspace.findFiles(includePattern);
+        
+        // Manually filter files using minimatch for better glob pattern support
+        files = allFiles.filter(fileUri => {
+            // Get relative path and normalize to forward slashes (minimatch requires this)
+            const relativePath = vscode.workspace.asRelativePath(fileUri, false).replace(/\\/g, '/');
+            
+            // Check if file matches any ignore pattern
+            for (const pattern of ignorePatterns) {
+                // Normalize pattern to forward slashes too
+                const normalizedPattern = pattern.replace(/\\/g, '/');
+                
+                if (minimatch(relativePath, normalizedPattern, { dot: true })) {
+                    return false; // File should be ignored
+                }
+            }
+            
+            return true; // File should be included
+        });
     } catch (err) {
         vscode.window.showErrorMessage(`CopyCat: Invalid glob pattern. ${err}`);
         return;
@@ -54,14 +78,12 @@ export async function generateMarkdown(rootPath: vscode.Uri, config: CopyCatConf
         try {
             const stat = await vscode.workspace.fs.stat(fileUri);
             if (stat.size > MAX_FILE_SIZE) {
-                output += `${relativePath}\n> Skipped: File too large (${(stat.size / 1024).toFixed(1)}KB)\n\n`;
                 continue;
             }
 
             const fileData = await vscode.workspace.fs.readFile(fileUri);
             
             if (isBinary(fileData)) {
-                output += `${relativePath}\n> Skipped: Binary file detected\n\n`;
                 continue;
             }
 
