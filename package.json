@@ -3,7 +3,7 @@
   "displayName": "CopyCat - Copy Your Codebase",
   "publisher": "Polar-rp",
   "description": "Automatically dumps code to Markdown on save",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "engines": {
     "vscode": "^1.90.0"
   },
