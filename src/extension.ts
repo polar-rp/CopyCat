@@ -1,13 +1,38 @@
-import * as vscode from 'vscode';
-import { createDefaultConfig, parseConfig } from './copycat/config';
-import { generateMarkdown } from './copycat/generator';
+/**
+ * CopyCat VS Code Extension
+ * Automatically generates markdown documentation from codebase
+ */
 
-// Map to store debounce timers for each workspace folder
+import * as vscode from 'vscode';
+import * as path from 'path';
+import { createDefaultConfig, parseConfig } from './copycat/config';
+import { generateMarkdown, generateMarkdownForSelection } from './copycat/generator';
+
+/**
+ * Map to store debounce timers for each workspace folder.
+ * Key: workspace folder URI as string
+ * Value: timeout for pending update
+ */
 const workspaceTimers = new Map<string, NodeJS.Timeout>();
+
+/**
+ * Delay in milliseconds before triggering an update after file changes.
+ * This prevents excessive regeneration during rapid file modifications.
+ */
 const DEBOUNCE_DELAY = 1000;
+
+/**
+ * Status bar item for displaying CopyCat status
+ */
 let statusBarItem: vscode.StatusBarItem;
 
-export function activate(context: vscode.ExtensionContext) {
+/**
+ * Activates the CopyCat extension.
+ * Sets up commands, event listeners, and status bar items.
+ *
+ * @param context - Extension context provided by VS Code
+ */
+export function activate(context: vscode.ExtensionContext): void {
     console.log('CopyCat is active!');
 
     // Create Status Bar Item
@@ -29,16 +54,76 @@ export function activate(context: vscode.ExtensionContext) {
 
     context.subscriptions.push(initCommand);
 
-    // Helper to trigger updates for affected folders
-    const triggerForUri = (uri: vscode.Uri) => {
-        if (uri.fsPath.endsWith('copycat.md')) { return; }
+    // Command: CopyCat Selection
+    const copycatSelectionCommand = vscode.commands.registerCommand(
+        'copy-cat.copycatSelection',
+        async (uri: vscode.Uri) => {
+            if (!uri) {
+                vscode.window.showErrorMessage('CopyCat: No file or folder selected.');
+                return;
+            }
+
+            // Warn if selecting existing .copycat.md file
+            if (uri.fsPath.endsWith('.copycat.md') || uri.fsPath.endsWith('copycat.md')) {
+                const proceed = await vscode.window.showWarningMessage(
+                    'You selected a CopyCat-generated markdown file. Generate anyway?',
+                    'Yes', 'No'
+                );
+                if (proceed !== 'Yes') {
+                    return;
+                }
+            }
+
+            try {
+                const itemName = path.basename(uri.fsPath);
+
+                const outputUri = await vscode.window.withProgress({
+                    location: vscode.ProgressLocation.Notification,
+                    title: `CopyCat: Generating markdown for "${itemName}"...`,
+                    cancellable: false
+                }, async () => {
+                    return await generateMarkdownForSelection(uri);
+                });
+
+                const openFile = await vscode.window.showInformationMessage(
+                    `CopyCat: Generated ${path.basename(outputUri.fsPath)}`,
+                    'Open File'
+                );
+
+                if (openFile === 'Open File') {
+                    const doc = await vscode.workspace.openTextDocument(outputUri);
+                    await vscode.window.showTextDocument(doc);
+                }
+            } catch (error) {
+                console.error('CopyCat Selection Error:', error);
+                vscode.window.showErrorMessage(
+                    `CopyCat: ${error instanceof Error ? error.message : 'Failed to generate markdown.'}`
+                );
+            }
+        }
+    );
+
+    context.subscriptions.push(copycatSelectionCommand);
+
+    /**
+     * Helper to trigger updates for a single URI.
+     * Skips updates if the URI is the generated copycat.md file itself.
+     */
+    const triggerForUri = (uri: vscode.Uri): void => {
+        if (uri.fsPath.endsWith('copycat.md')) {
+            return;
+        }
         const folder = vscode.workspace.getWorkspaceFolder(uri);
         if (folder) {
             triggerUpdate(folder);
         }
     };
 
-    const triggerForUris = (uris: readonly vscode.Uri[]) => {
+    /**
+     * Helper to trigger updates for multiple URIs.
+     * Deduplicates workspace folders to avoid redundant updates.
+     */
+    const triggerForUris = (uris: readonly vscode.Uri[]): void => {
         const affectedFolders = new Set<vscode.WorkspaceFolder>();
         for (const uri of uris) {
             const folder = vscode.workspace.getWorkspaceFolder(uri);
@@ -46,7 +131,7 @@ export function activate(context: vscode.ExtensionContext) {
                 affectedFolders.add(folder);
             }
         }
-        affectedFolders.forEach(folder => triggerUpdate(folder));
+        affectedFolders.forEach((folder) => triggerUpdate(folder));
     };
 
     // Event Listeners
@@ -61,7 +146,13 @@ export function activate(context: vscode.ExtensionContext) {
     );
 }
 
-function triggerUpdate(folder: vscode.WorkspaceFolder) {
+/**
+ * Triggers a debounced update for the specified workspace folder.
+ * If an update is already pending, it will be reset and rescheduled.
+ *
+ * @param folder - The workspace folder to update
+ */
+function triggerUpdate(folder: vscode.WorkspaceFolder): void {
     const key = folder.uri.toString();
     const existingTimer = workspaceTimers.get(key);
     
@@ -77,7 +168,13 @@ function triggerUpdate(folder: vscode.WorkspaceFolder) {
     workspaceTimers.set(key, timer);
 }
 
-async function runUpdate(folder: vscode.WorkspaceFolder) {
+/**
+ * Executes the markdown generation for the specified workspace folder.
+ * Updates the status bar to reflect progress and results.
+ *
+ * @param folder - The workspace folder to generate markdown for
+ */
+async function runUpdate(folder: vscode.WorkspaceFolder): Promise<void> {
     statusBarItem.text = '$(sync~spin) CopyCat: Updating...';
     statusBarItem.show();
 
@@ -114,7 +211,11 @@ async function runUpdate(folder: vscode.WorkspaceFolder) {
     });
 }
 
-export function deactivate() {
+/**
+ * Deactivates the CopyCat extension.
+ * Cleans up timers and disposes of resources.
+ */
+export function deactivate(): void {
     for (const timer of workspaceTimers.values()) {
         clearTimeout(timer);
     }

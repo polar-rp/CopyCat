@@ -1,12 +1,19 @@
+/**
+ * Configuration management for CopyCat
+ */
+
 import * as vscode from 'vscode';
 import { DEFAULT_CONFIG } from './defaults';
+import { CopyCatConfig } from './types';
 
-export interface CopyCatConfig {
-    include: string[];
-    ignore: string[];
-}
-
-export async function createDefaultConfig(rootPath: vscode.Uri) {
+/**
+ * Creates a default .copycat configuration file in the specified workspace root.
+ * If the file already exists, shows an info message instead.
+ *
+ * @param rootPath - Root URI of the workspace
+ * @returns Promise that resolves when the config is created or verified
+ */
+export async function createDefaultConfig(rootPath: vscode.Uri): Promise<void> {
     const configUri = vscode.Uri.joinPath(rootPath, '.copycat');
     try {
         await vscode.workspace.fs.stat(configUri);
@@ -17,6 +24,13 @@ export async function createDefaultConfig(rootPath: vscode.Uri) {
     }
 }
 
+/**
+ * Parses the .copycat configuration file from the specified workspace root.
+ * The config file uses a simple INI-like format with [INCLUDE] and [IGNORE] sections.
+ *
+ * @param rootPath - Root URI of the workspace
+ * @returns Promise that resolves to parsed configuration or null if config doesn't exist
+ */
 export async function parseConfig(rootPath: vscode.Uri): Promise<CopyCatConfig | null> {
     const configUri = vscode.Uri.joinPath(rootPath, '.copycat');
     let content = '';

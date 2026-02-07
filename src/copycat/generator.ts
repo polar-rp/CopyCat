@@ -1,121 +1,299 @@
+/**
+ * Core markdown generation logic for CopyCat
+ */
+
 import * as vscode from 'vscode';
 import * as path from 'path';
-import { minimatch } from 'minimatch';
-import { CopyCatConfig } from './config';
-import {LANG_MAP, ALWAYS_IGNORED, MAX_FILE_SIZE} from './defaults';
+import { CopyCatConfig, MarkdownGenerationResult } from './types';
+import {
+    normalizePath,
+    matchesAnyPattern,
+    shouldIgnoreFile,
+    getAlwaysIgnoredPatterns,
+} from './utils/pathUtils';
+import {
+    validateFile,
+    getLanguageIdentifier,
+    collectFilesRecursively,
+} from './utils/fileUtils';
 
-export async function generateMarkdown(rootPath: vscode.Uri, config: CopyCatConfig): Promise<void> {
+/**
+ * Generates markdown documentation for an entire workspace based on configuration.
+ *
+ * @param rootPath - Root URI of the workspace
+ * @param config - CopyCat configuration specifying include/ignore patterns
+ * @returns Promise that resolves when markdown generation is complete
+ */
+export async function generateMarkdown(
+    rootPath: vscode.Uri,
+    config: CopyCatConfig
+): Promise<void> {
     const mdPath = vscode.Uri.joinPath(rootPath, 'copycat.md');
 
-    // Handle empty include
-    if (config.include.length === 0) {
-        // Fallback or exit? Let's assume user wants to track nothing or everything. 
-        // Based on typical behavior, empty might mean "nothing" or "everything".
-        // Let's warn and default to everything to be safe, or just return.
-        // Given the request, let's default to basic source files if empty, or just '**/*'.
-        config.include = ['**/*'];
-    }
+    // Validate and normalize configuration
+    const normalizedConfig = normalizeConfig(config);
 
     // Combine user config with always-ignored patterns
-    // Transform simple folder names to glob patterns
-    const alwaysIgnoredPatterns = ALWAYS_IGNORED.map(pattern => {
-        // If it's a simple name without glob patterns, convert to **/name/**
-        if (!pattern.includes('/') && !pattern.includes('*') && !pattern.includes('.')) {
-            return `**/${pattern}/**`;
-        }
-        return pattern;
-    });
-    const ignorePatterns = [...config.ignore, ...alwaysIgnoredPatterns];
+    const ignorePatterns = [...normalizedConfig.ignore, ...getAlwaysIgnoredPatterns()];
 
-    // Construct Globs
-    const includeString = config.include.length > 1 
-        ? `{${config.include.join(',')}}` 
-        : config.include[0];
+    // Find files matching include patterns
+    const files = await findIncludedFiles(rootPath, normalizedConfig.include, ignorePatterns);
 
-    // Use RelativePattern to scope search to the specific rootPath (supports multi-root better)
-    const includePattern = new vscode.RelativePattern(rootPath, includeString);
-
-    let files: vscode.Uri[] = [];
-    try {
-        // Get all files matching include pattern (no exclude pattern here)
-        const allFiles = await vscode.workspace.findFiles(includePattern);
-        
-        // Manually filter files using minimatch for better glob pattern support
-        files = allFiles.filter(fileUri => {
-            // Get relative path and normalize to forward slashes (minimatch requires this)
-            const relativePath = vscode.workspace.asRelativePath(fileUri, false).replace(/\\/g, '/');
-            
-            // Check if file matches any ignore pattern
-            for (const pattern of ignorePatterns) {
-                // Normalize pattern to forward slashes too
-                const normalizedPattern = pattern.replace(/\\/g, '/');
-                
-                if (minimatch(relativePath, normalizedPattern, { dot: true })) {
-                    return false; // File should be ignored
-                }
-            }
-            
-            return true; // File should be included
-        });
-    } catch (err) {
-        vscode.window.showErrorMessage(`CopyCat: Invalid glob pattern. ${err}`);
-        return;
-    }
-
-    // Sort files
+    // Sort files for consistent output
     files.sort((a, b) => a.fsPath.localeCompare(b.fsPath));
 
+    // Generate markdown content
+    const output = await generateMarkdownContent(files, mdPath);
+
+    // Write output file
+    await vscode.workspace.fs.writeFile(mdPath, Buffer.from(output, 'utf8'));
+}
+
+/**
+ * Normalizes configuration by providing defaults for empty values.
+ *
+ * @param config - The configuration to normalize
+ * @returns Normalized configuration
+ */
+function normalizeConfig(config: CopyCatConfig): CopyCatConfig {
+    return {
+        include: config.include.length === 0 ? ['**/*'] : config.include,
+        ignore: config.ignore,
+    };
+}
+
+/**
+ * Finds all files matching include patterns while excluding ignore patterns.
+ *
+ * @param rootPath - Root URI of the workspace
+ * @param includePatterns - Array of glob patterns to include
+ * @param ignorePatterns - Array of glob patterns to ignore
+ * @returns Promise that resolves to array of matching file URIs
+ */
+async function findIncludedFiles(
+    rootPath: vscode.Uri,
+    includePatterns: string[],
+    ignorePatterns: string[]
+): Promise<vscode.Uri[]> {
+    // Construct include glob pattern
+    const includeString =
+        includePatterns.length > 1 ? `{${includePatterns.join(',')}}` : includePatterns[0];
+
+    // Use RelativePattern to scope search to the specific rootPath
+    const includePattern = new vscode.RelativePattern(rootPath, includeString);
+
+    try {
+        const allFiles = await vscode.workspace.findFiles(includePattern);
+
+        // Filter files using ignore patterns
+        return allFiles.filter((fileUri) => {
+            const relativePath = vscode.workspace.asRelativePath(fileUri, false);
+            return !matchesAnyPattern(relativePath, ignorePatterns);
+        });
+    } catch (error) {
+        vscode.window.showErrorMessage(`CopyCat: Invalid glob pattern. ${error}`);
+        return [];
+    }
+}
+
+/**
+ * Generates markdown content from an array of file URIs.
+ *
+ * @param files - Array of file URIs to process
+ * @param mdPath - Path to the output markdown file (to exclude it)
+ * @returns Promise that resolves to the generated markdown string
+ */
+async function generateMarkdownContent(
+    files: vscode.Uri[],
+    mdPath: vscode.Uri
+): Promise<string> {
     let output = '';
 
     for (const fileUri of files) {
-        // Skip copycat.md itself
+        // Skip the output markdown file itself
         if (fileUri.fsPath === mdPath.fsPath) {
             continue;
         }
 
-        const relativePath = vscode.workspace.asRelativePath(fileUri, false);
-        
-        try {
-            const stat = await vscode.workspace.fs.stat(fileUri);
-            if (stat.size > MAX_FILE_SIZE) {
-                continue;
-            }
-
-            const fileData = await vscode.workspace.fs.readFile(fileUri);
-            
-            if (isBinary(fileData)) {
-                continue;
-            }
-
-            const content = fileData.toString();
-            const language = getLanguageFromExtension(fileUri.fsPath);
-
-            output += `${relativePath}\n`;
-            output += '```' + language + '\n';
-            output += content + '\n';
-            output += '```\n\n';
-        } catch (err) {
-            console.error(`Error reading file ${relativePath}:`, err);
-            output += `${relativePath}\n`;
-            output += `> Error reading file: ${err}\n\n`;
+        const fileMarkdown = await formatFileAsMarkdown(fileUri);
+        if (fileMarkdown) {
+            output += fileMarkdown;
         }
     }
 
-    await vscode.workspace.fs.writeFile(mdPath, Buffer.from(output, 'utf8'));
+    return output;
 }
 
-function getLanguageFromExtension(filePath: string): string {
-    const ext = path.extname(filePath).toLowerCase();
-    return LANG_MAP[ext] ?? '';
+/**
+ * Formats a single file as a markdown code block.
+ *
+ * @param fileUri - URI of the file to format
+ * @returns Promise that resolves to markdown string or null if file should be skipped
+ */
+async function formatFileAsMarkdown(fileUri: vscode.Uri): Promise<string | null> {
+    const relativePath = vscode.workspace.asRelativePath(fileUri, false);
+
+    try {
+        // Validate file (size, binary check)
+        const validation = await validateFile(fileUri);
+
+        if (!validation.valid) {
+            return null; // Skip invalid files silently
+        }
+
+        // Format as markdown
+        const content = validation.data!.toString();
+        const language = getLanguageIdentifier(fileUri.fsPath);
+
+        return `${relativePath}\n\`\`\`${language}\n${content}\n\`\`\`\n\n`;
+    } catch (error) {
+        console.error(`Error processing file ${relativePath}:`, error);
+        return `${relativePath}\n> Error reading file: ${error}\n\n`;
+    }
 }
 
-function isBinary(buffer: Uint8Array): boolean {
-    // Check first 1024 bytes for null byte
-    const checkLen = Math.min(buffer.length, 1024);
-    for (let i = 0; i < checkLen; i++) {
-        if (buffer[i] === 0) { // Null byte
-            return true;
+/**
+ * Generates markdown for a user-selected file or folder.
+ *
+ * @param selectedUri - URI of the selected file or folder
+ * @returns Promise that resolves to the URI of the generated markdown file
+ */
+export async function generateMarkdownForSelection(
+    selectedUri: vscode.Uri
+): Promise<vscode.Uri> {
+    // Determine if selection is a file or folder
+    const stat = await vscode.workspace.fs.stat(selectedUri);
+    const isFolder = stat.type === vscode.FileType.Directory;
+
+    // Get configuration
+    const config = vscode.workspace.getConfiguration('copycat');
+    const saveToRoot = config.get<boolean>('saveSelectionToRoot', false);
+
+    // Determine output path
+    const outputPath = determineOutputPath(selectedUri, isFolder, saveToRoot);
+
+    // Collect files to process
+    const files = await collectFilesToProcess(selectedUri, isFolder);
+
+    // Generate markdown
+    const output = await generateSelectionMarkdown(files, selectedUri);
+
+    // Write output file
+    await vscode.workspace.fs.writeFile(outputPath, Buffer.from(output, 'utf8'));
+
+    return outputPath;
+}
+
+/**
+ * Determines the output path for selection-based markdown generation.
+ *
+ * @param selectedUri - URI of the selected file or folder
+ * @param isFolder - Whether the selection is a folder
+ * @param saveToRoot - Whether to save to workspace root
+ * @returns URI for the output markdown file
+ */
+function determineOutputPath(
+    selectedUri: vscode.Uri,
+    isFolder: boolean,
+    saveToRoot: boolean
+): vscode.Uri {
+    // Generate output filename
+    const baseName = path.basename(selectedUri.fsPath);
+    const outputFileName = `${baseName}.copycat.md`;
+
+    if (saveToRoot) {
+        // Save to workspace root
+        const workspaceFolder = vscode.workspace.getWorkspaceFolder(selectedUri);
+        if (!workspaceFolder) {
+            throw new Error('No workspace folder found. Cannot save to root.');
+        }
+        return vscode.Uri.joinPath(workspaceFolder.uri, outputFileName);
+    }
+
+    // Save next to selection
+    if (isFolder) {
+        const parentDir = vscode.Uri.file(path.dirname(selectedUri.fsPath));
+        return vscode.Uri.joinPath(parentDir, outputFileName);
+    }
+
+    const parentDir = path.dirname(selectedUri.fsPath);
+    return vscode.Uri.file(path.join(parentDir, outputFileName));
+}
+
+/**
+ * Collects files to process for selection-based generation.
+ *
+ * @param selectedUri - URI of the selected file or folder
+ * @param isFolder - Whether the selection is a folder
+ * @returns Promise that resolves to sorted array of file URIs
+ */
+async function collectFilesToProcess(
+    selectedUri: vscode.Uri,
+    isFolder: boolean
+): Promise<vscode.Uri[]> {
+    const files = isFolder
+        ? await collectFilesRecursively(selectedUri)
+        : [selectedUri];
+
+    // Sort for consistent output
+    files.sort((a, b) => a.fsPath.localeCompare(b.fsPath));
+
+    return files;
+}
+
+/**
+ * Generates markdown content from selected files.
+ *
+ * @param files - Array of file URIs to process
+ * @param rootUri - Root URI for relative path calculation
+ * @returns Promise that resolves to the generated markdown string
+ */
+async function generateSelectionMarkdown(
+    files: vscode.Uri[],
+    rootUri: vscode.Uri
+): Promise<string> {
+    let output = '';
+
+    for (const fileUri of files) {
+        const fileMarkdown = await processFileForSelection(fileUri);
+        if (fileMarkdown) {
+            output += fileMarkdown;
         }
     }
-    return false;
+
+    return output;
+}
+
+/**
+ * Processes a single file for selection-based markdown generation.
+ * Applies always-ignored patterns but not user config patterns.
+ *
+ * @param fileUri - URI of the file to process
+ * @returns Promise that resolves to markdown string or null if file should be skipped
+ */
+async function processFileForSelection(fileUri: vscode.Uri): Promise<string | null> {
+    const relativePath = vscode.workspace.asRelativePath(fileUri, false);
+
+    // Check if should be ignored (using always-ignored patterns only)
+    if (shouldIgnoreFile(relativePath)) {
+        return null;
+    }
+
+    try {
+        // Validate file
+        const validation = await validateFile(fileUri);
+
+        if (!validation.valid) {
+            return null;
+        }
+
+        // Format as markdown
+        const content = validation.data!.toString();
+        const language = getLanguageIdentifier(fileUri.fsPath);
+
+        return `${relativePath}\n\`\`\`${language}\n${content}\n\`\`\`\n\n`;
+    } catch (error) {
+        console.error(`Error processing file ${relativePath}:`, error);
+        return `${relativePath}\n> Error reading file: ${error}\n\n`;
+    }
 }

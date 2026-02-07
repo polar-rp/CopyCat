@@ -20,8 +20,32 @@
       {
         "command": "copy-cat.initialize",
         "title": "CopyCat: Initialize"
+      },
+      {
+        "command": "copy-cat.copycatSelection",
+        "title": "CopyCat: Generate Markdown for Selection"
       }
-    ]
+    ],
+    "menus": {
+      "explorer/context": [
+        {
+          "command": "copy-cat.copycatSelection",
+          "when": "!explorerResourceIsFolder || explorerResourceIsFolder",
+          "group": "2_workspace@100"
+        }
+      ]
+    },
+    "configuration": {
+      "type": "object",
+      "title": "CopyCat",
+      "properties": {
+        "copycat.saveSelectionToRoot": {
+          "type": "boolean",
+          "default": false,
+          "description": "Save generated markdown files to workspace root instead of next to the selected file/folder"
+        }
+      }
+    }
   },
   "repository": {
     "type": "git",
